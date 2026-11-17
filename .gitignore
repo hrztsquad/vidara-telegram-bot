@@ -1,0 +1,16 @@
+# Media Downloads
+*.mp4
+*.mkv
+*.ts
+downloads/
+temp_downloads/
+
+# Python Artifacts
+__pycache__/
+*.pyc
+
+# Environments
+.env
+.venv
+env/
+venv/
