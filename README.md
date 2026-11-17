@@ -1,147 +1,73 @@
-# 🎬 Vidara Downloader Telegram Bot
+# 🎬 Vidara Downloader Telegram Bot (MTProto Edition)
 
-Telegram Bot bertenaga tinggi untuk mengekstrak dan mengunduh video streaming HLS langsung dari **Vidara** (`vidara.to` / `vidara.so`) tanpa iklan, lalu mengirimkannya langsung ke obrolan Telegram pengguna.
+Telegram Bot bertenaga tinggi untuk mengekstrak dan mengunduh video streaming HLS langsung dari **Vidara** (`vidara.to` / `vidara.so`) tanpa iklan, lalu mengirimkannya langsung ke chat Telegram pengguna hingga ukuran **2.000 MB (2 GB)**!
 
-Proyek ini mengintegrasikan mesin ekstraksi dari [VidaraCLI](https://github.com/RozhakDev/VidaraCLI) dengan `python-telegram-bot` dan FFmpeg.
+Bot ini menggunakan protokol **Native MTProto (Pyrogram)** — teknologi yang sama seperti bot terkenal (*DOD Downloader*) — sehingga **TIDAK MEMERLUKAN DOCKER ATAU SERVER PERANTARA LAINNYA**.
 
 ---
 
 ## ✨ Fitur Utama
 
-- **Bebas Iklan (*Ad-Free*)**: Mem-bypass pemutar web dan pop-up iklan dengan langsung mengambil stream HLS (`.m3u8`) dari API internal.
-- **Dua Cara Penggunaan**:
-  - Gunakan perintah: `/download https://vidara.to/e/...`
-  - Atau cukup **kirimkan link video langsung** ke obrolan bot.
-- **Kualitas Asli & Cepat**: Menggunakan proses *stream copy* FFmpeg (`-c copy`), sehingga proses pengunduhan sangat cepat dan tanpa beban CPU berlebih.
-- **Pembersihan Otomatis (*Auto-Cleanup*)**: File video sementara di VPS otomatis dihapus setelah terkirim ke Telegram agar tidak menghabiskan ruang penyimpanan (*storage*).
-- **Siap Jalan 24/7 di VPS**: Disertai konfigurasi `systemd` dan skrip `deploy.sh` otomatis agar bot tetap aktif tanpa henti meskipun sesi SSH ditutup.
+- **Native MTProto (Batas Upload 2 GB)**: Tidak terhalang batas 50 MB bawaan HTTP Telegram, mampu mengirim video 69 MB, 400 MB, hingga 2 GB.
+- **Tanpa Docker**: Murni berjalan melalui Python di VPS tanpa perlu port 8081 atau container Docker.
+- **Progres Live 2 Arah**:
+  - Saat Download: Memperlihatkan akumulasi MB terunduh ke VPS secara real-time.
+  - Saat Upload: Menampilkan persentase (`%`) dan MB yang sedang diunggah ke chat Telegram.
+- **Menu Tombol Resmi Telegram**: Tombol menu praktis di kiri bawah layar obrolan.
+- **Perintah `/status` Sistem**: Cek uptime bot, sisa kapasitas storage VPS (100 GB), dan status proses aktif.
+- **Pembersihan Otomatis (*Auto-Cleanup*)**: File sementara di VPS otomatis dihapus setelah terkirim agar storage tetap bersih.
+- **Aktif 24/7 di Background**: Berjalan via `systemd service` Linux.
 
 ---
 
-## 📋 Prasyarat Sistem
+## 📋 Prasyarat
 
-- **VPS Linux** (Ubuntu / Debian / CentOS / dsb.)
-- **Python 3.8+**
-- **FFmpeg** terpasang di sistem
-- **Token Bot Telegram** dari [@BotFather](https://t.me/BotFather)
-
----
-
-## 🚀 Panduan Instalasi Cepat di VPS (Otomatis)
-
-1. **Clone repositori ini ke VPS Anda:**
-   ```bash
-   git clone https://github.com/hrztsquad/vidara-telegram-bot.git
-   cd vidara-telegram-bot
-   ```
-
-2. **Buat file `.env` dan masukkan Token Bot Telegram Anda:**
-   ```bash
-   cp .env.example .env
-   nano .env
-   ```
-   Isi bagian `TELEGRAM_BOT_TOKEN`:
-   ```env
-   TELEGRAM_BOT_TOKEN="9135755025:AAFd1XO9HJ9yp_2W7A7KSQKBFmzzVCNKqJE"
-   ```
-   *(Simpan dengan menekan `Ctrl + O`, `Enter`, lalu `Ctrl + X`)*.
-
-3. **Jalankan skrip deployment otomatis:**
-   ```bash
-   chmod +x deploy.sh
-   ./deploy.sh
-   ```
-
-Skrip di atas akan secara otomatis menginstal FFmpeg, membuat virtual environment, memasang dependensi, mendaftarkan `systemd service`, dan langsung menyalakan bot di latar belakang (*background*).
+- **VPS Linux** (Ubuntu / Debian)
+- **Python 3.8+** & **FFmpeg**
+- **Token Bot** dari [@BotFather](https://t.me/BotFather)
+- **API ID & API Hash** dari [my.telegram.org](https://my.telegram.org)
 
 ---
 
-## 🛠️ Instalasi Manual (Langkah demi Langkah)
+## 🚀 Panduan Instalasi & Jalankan di VPS
 
-Jika Anda ingin menjalankannya secara manual tanpa skrip:
+Jalankan perintah ini di terminal VPS Anda:
 
 ```bash
-# 1. Update sistem dan instal paket yang dibutuhkan
-sudo apt update && sudo apt install -y ffmpeg python3 python3-pip python3-venv git
+# 1. Masuk ke folder bot dan tarik kode terbaru
+cd ~/vidara-telegram-bot
+git pull
 
-# 2. Setup virtual environment
-python3 -m venv venv
+# 2. Aktifkan virtual environment dan pasang pustaka Pyrogram
 source venv/bin/activate
-
-# 3. Instal dependensi Python
 pip install -r requirements.txt
 
-# 4. Salin dan edit konfigurasi .env
-cp .env.example .env
+# 3. Pastikan konfigurasi .env sudah lengkap
 nano .env
+```
 
-# 5. Jalankan bot untuk pengetesan
-python bot.py
+Pastikan isi `.env` Anda seperti ini:
+```env
+TELEGRAM_BOT_TOKEN="9135755025:AAFd1XO9HJ9yp_2W7A7KSQKBFmzzVCNKqJE"
+TELEGRAM_API_ID="33293249"
+TELEGRAM_API_HASH="a37a1817bb119b4e09ec45728794d622"
+DOWNLOAD_DIR="/tmp/vidara_downloads"
+```
+*(Simpan dengan `Ctrl + O`, `Enter`, lalu `Ctrl + X`)*.
+
+```bash
+# 4. Restart bot Anda
+sudo systemctl restart vidarabot
+sudo systemctl status vidarabot --no-pager
 ```
 
 ---
 
-## 🔄 Mengelola Bot di VPS (Systemd)
+## 🎮 Penggunaan di Telegram
 
-Setelah `systemd` aktif, Anda dapat mengontrol bot kapan saja dengan perintah:
-
-| Aksi | Perintah Terminal |
-| :--- | :--- |
-| **Cek Status Bot** | `sudo systemctl status vidarabot` |
-| **Melihat Log Real-time** | `sudo journalctl -u vidarabot -f` |
-| **Restart Bot** | `sudo systemctl restart vidarabot` |
-| **Menghentikan Bot** | `sudo systemctl stop vidarabot` |
-| **Menyalakan Bot** | `sudo systemctl start vidarabot` |
-
----
-
-## 🚀 Mengaktifkan Unggahan Video Hingga 2 GB (Local Bot API)
-
-Secara default, Telegram membatasi upload bot standar maksimal **50 MB**. Namun karena VPS Anda memiliki RAM dan storage yang besar, Anda dapat mengaktifkan **Local Telegram Bot API Server** agar batas upload naik menjadi **2.000 MB (2 GB)**:
-
-1. **Dapatkan `api_id` dan `api_hash` Anda:**
-   - Login di [my.telegram.org](https://my.telegram.org) menggunakan nomor Telegram Anda.
-   - Pilih menu **API development tools**.
-   - Buat aplikasi baru (isi nama aplikasi sembarang, misal `VidaraDownloader`).
-   - Salin nilai **api_id** dan **api_hash**.
-
-2. **Jalankan Local Bot API Server via Docker di VPS:**
-   ```bash
-   # Pasang Docker jika belum ada
-   sudo apt install -y docker.io
-
-   # Jalankan server lokal di background
-   sudo docker run -d \
-     --name telegram-bot-api \
-     --restart always \
-     -p 8081:8081 \
-     -v /tmp/telegram-bot-api-data:/var/lib/telegram-bot-api \
-     aiogram/telegram-bot-api:latest \
-     --api-id=ISI_DENGAN_API_ID \
-     --api-hash=ISI_DENGAN_API_HASH \
-     --local
-   ```
-
-3. **Sambungkan bot Anda ke Local Server:**
-   Buka file `.env`:
-   ```bash
-   nano .env
-   ```
-   Tambahkan/aktifkan baris berikut:
-   ```env
-   LOCAL_BOT_API_URL="http://127.0.0.1:8081/bot"
-   MAX_FILE_SIZE_MB=2000
-   ```
-   Lalu restart bot:
-   ```bash
-   sudo systemctl restart vidarabot
-   ```
-   Sekarang bot Anda sudah dapat mengunggah video berukuran hingga **2 GB**!
-
----
-
-## 📄 Lisensi & Disclaimer
-
-Proyek ini disediakan untuk tujuan edukasi dan pengarsipan pribadi (*personal archiving*). Pengguna bertanggung jawab penuh atas konten yang diunduh sesuai dengan ketentuan layanan masing-masing platform.
-
-Lisensi di bawah **MIT License**.
+1. Buka obrolan dengan bot: **[@vidaradownload_bot](https://t.me/vidaradownload_bot)**
+2. Kirim perintah:
+   - `/start` : Memulai bot & melihat panduan.
+   - `/status` : Melihat kapasitas sisa disk VPS dan proses aktif.
+   - `/download https://vidara.to/v/xxxx` : Mengunduh video.
+   - Atau langsung **kirim/paste link video** ke chat bot!
