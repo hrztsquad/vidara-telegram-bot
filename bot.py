@@ -23,6 +23,7 @@ from telegram.ext import (
 load_dotenv()
 
 from src.vidara.core.engine import VidaraEngine
+from src.vidara.utils import sanitize_filename
 
 # Logging configuration
 logging.basicConfig(
@@ -71,9 +72,9 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def process_video_download(update: Update, target_url: str):
-    """Core logic to download from Vidara and send to Telegram."""
+    """Core logic to download from Vidara and send to Telegram with live progress."""
     status_msg = await update.message.reply_text(
-        "🔍 <i>Memeriksa link dan mengambil informasi video...</i>",
+        "🔍 <b>[1/3] Menghubungkan ke Vidara & memeriksa metadata...</b>",
         parse_mode=ParseMode.HTML
     )
     file_path = None
@@ -82,42 +83,78 @@ async def process_video_download(update: Update, target_url: str):
         loop = asyncio.get_running_loop()
         engine = VidaraEngine(output_dir=DOWNLOAD_DIR)
 
+        # 1. Fetch metadata
+        metadata = await loop.run_in_executor(None, lambda: engine.fetch_video_data(target_url))
+        title = metadata.title or metadata.filecode or "Vidara Video"
+        filename = f"{sanitize_filename(title)}.mp4"
+        expected_output_path = os.path.join(DOWNLOAD_DIR, filename)
+
         await status_msg.edit_text(
-            "⏳ <i>Mengunduh video via FFmpeg ke server VPS...</i>",
+            f"🎬 <b>{title}</b>\n\n"
+            f"⏳ <b>[2/3] Memulai proses download stream via FFmpeg...</b>\n"
+            f"📊 Terunduh saat ini: <code>0.0 MB</code>\n"
+            f"⚡ Mode: Stream-Copy (Kualitas Asli)",
             parse_mode=ParseMode.HTML
         )
 
-        def download_worker():
-            metadata = engine.fetch_video_data(target_url)
-            saved_path = engine.process_download(metadata)
-            return saved_path, metadata
+        # 2. Background task to report live download progress
+        download_finished = asyncio.Event()
 
-        # Execute blocking download inside threadpool
-        file_path, metadata = await loop.run_in_executor(None, download_worker)
+        async def track_download_progress():
+            last_reported_mb = -1.0
+            while not download_finished.is_set():
+                await asyncio.sleep(3.5)
+                if download_finished.is_set():
+                    break
+                if os.path.exists(expected_output_path):
+                    try:
+                        current_mb = os.path.getsize(expected_output_path) / (1024 * 1024)
+                        if abs(current_mb - last_reported_mb) >= 0.8:
+                            last_reported_mb = current_mb
+                            await status_msg.edit_text(
+                                f"🎬 <b>{title}</b>\n\n"
+                                f"⏳ <b>[2/3] Sedang mengunduh stream video ke VPS...</b>\n"
+                                f"📊 Terunduh: <code>{current_mb:.1f} MB</code>\n"
+                                f"⚡ Mode: Stream-Copy FFmpeg (Kualitas Asli)",
+                                parse_mode=ParseMode.HTML
+                            )
+                    except Exception:
+                        pass
+
+        reporter_task = asyncio.create_task(track_download_progress())
+
+        # 3. Execute download
+        try:
+            file_path = await loop.run_in_executor(None, lambda: engine.process_download(metadata))
+        finally:
+            download_finished.set()
+            reporter_task.cancel()
 
         if not file_path or not os.path.exists(file_path):
             raise RuntimeError("File hasil unduhan tidak ditemukan di server.")
 
-        # Check file size
+        # Check final file size
         file_size_bytes = os.path.getsize(file_path)
         file_size_mb = file_size_bytes / (1024 * 1024)
-        title = metadata.title or metadata.filecode or "Vidara Video"
-
         logger.info(f"Downloaded '{title}' ({file_size_mb:.2f} MB)")
 
-        # File size check
+        # File size check against Telegram limits
         if file_size_mb > MAX_FILE_SIZE_MB:
             await status_msg.edit_text(
                 f"⚠️ <b>Ukuran file terlalu besar!</b>\n\n"
                 f"Judul: <b>{title}</b>\n"
                 f"Ukuran: <code>{file_size_mb:.2f} MB</code>\n\n"
-                f"Batas upload bot saat ini adalah <b>{MAX_FILE_SIZE_MB} MB</b>.",
+                f"Batas upload bot saat ini adalah <b>{MAX_FILE_SIZE_MB} MB</b>.\n"
+                f"<i>(Aktifkan Local Bot API Server di VPS untuk mengizinkan s.d 2000 MB / 2 GB).</i>",
                 parse_mode=ParseMode.HTML
             )
             return
 
+        # 4. Notify uploading
         await status_msg.edit_text(
-            f"📤 <i>Mengunggah ke Telegram ({file_size_mb:.1f} MB)...</i>",
+            f"🎬 <b>{title}</b>\n\n"
+            f"📤 <b>[3/3] Selesai diunduh ({file_size_mb:.1f} MB)!</b>\n"
+            f"Sedang mengunggah file video ke Telegram...",
             parse_mode=ParseMode.HTML
         )
 

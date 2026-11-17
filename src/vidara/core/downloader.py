@@ -47,8 +47,19 @@ class FFmpegDownloader:
         output_path = os.path.join(self.output_dir, filename)
         
         try:
-            stream = ffmpeg.input(stream_url)
-            stream = ffmpeg.output(stream, output_path, c='copy', loglevel='warning')
+            stream = ffmpeg.input(
+                stream_url,
+                reconnect=1,
+                reconnect_streamed=1,
+                reconnect_delay_max=5
+            )
+            stream = ffmpeg.output(
+                stream,
+                output_path,
+                c='copy',
+                loglevel='warning',
+                threads=4
+            )
             ffmpeg.run(stream, capture_stdout=True, capture_stderr=True, overwrite_output=True)
             return output_path
         except ffmpeg.Error as e:
