@@ -330,6 +330,19 @@ async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await process_video_download(update, target_url)
 
 
+def is_local_api_running(base_url: str) -> bool:
+    """Checks if the local bot API endpoint is actually responsive."""
+    import urllib.request
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(base_url)
+        test_url = f"{parsed.scheme}://{parsed.netloc}/"
+        with urllib.request.urlopen(test_url, timeout=2.0) as resp:
+            return True
+    except Exception:
+        return False
+
+
 def main():
     if not BOT_TOKEN or BOT_TOKEN == "your_telegram_bot_token_here":
         print("=" * 60)
@@ -342,10 +355,17 @@ def main():
     builder = ApplicationBuilder().token(BOT_TOKEN).post_init(set_bot_menu)
 
     if LOCAL_BOT_API_URL:
-        # local_mode allows local file handling directly without HTTP re-upload
-        builder = builder.base_url(LOCAL_BOT_API_URL).local_mode(True)
-        print(f"📡 Mode: LOCAL BOT API SERVER ({LOCAL_BOT_API_URL})")
-        print(f"📦 Batas ukuran file: {MAX_FILE_SIZE_MB} MB (s.d 2 GB)")
+        if is_local_api_running(LOCAL_BOT_API_URL):
+            builder = builder.base_url(LOCAL_BOT_API_URL).local_mode(True)
+            print(f"📡 Mode: LOCAL BOT API SERVER AKTIF ({LOCAL_BOT_API_URL})")
+            print(f"📦 Batas ukuran file: {MAX_FILE_SIZE_MB} MB (s.d 2 GB)")
+        else:
+            print("=" * 60)
+            print(f"⚠️ PERINGATAN: Local Bot API di {LOCAL_BOT_API_URL} tidak merespons (Docker mungkin belum jalan).")
+            print("🚀 Otomatis beralih ke TELEGRAM CLOUD SERVER agar bot tetap aktif dan merespons obrolan!")
+            print("=" * 60)
+            globals()["LOCAL_BOT_API_URL"] = ""
+            globals()["MAX_FILE_SIZE_MB"] = 50
     else:
         print(f"☁️ Mode: TELEGRAM CLOUD SERVER (Batas default: {MAX_FILE_SIZE_MB} MB)")
 
