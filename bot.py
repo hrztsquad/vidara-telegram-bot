@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 # Config
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/vidara_downloads")
+LOCAL_BOT_API_URL = os.getenv("LOCAL_BOT_API_URL", "").strip()
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "2000" if LOCAL_BOT_API_URL else "50"))
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -103,13 +105,13 @@ async def process_video_download(update: Update, target_url: str):
 
         logger.info(f"Downloaded '{title}' ({file_size_mb:.2f} MB)")
 
-        # Telegram standard bot upload limit is 50MB
-        if file_size_mb > 50:
+        # File size check
+        if file_size_mb > MAX_FILE_SIZE_MB:
             await status_msg.edit_text(
                 f"⚠️ <b>Ukuran file terlalu besar!</b>\n\n"
                 f"Judul: <b>{title}</b>\n"
                 f"Ukuran: <code>{file_size_mb:.2f} MB</code>\n\n"
-                f"Telegram membatasi upload bot standar maksimal <b>50 MB</b> per file.",
+                f"Batas upload bot saat ini adalah <b>{MAX_FILE_SIZE_MB} MB</b>.",
                 parse_mode=ParseMode.HTML
             )
             return
@@ -203,7 +205,17 @@ def main():
         return
 
     print("🚀 Menginisialisasi Vidara Downloader Telegram Bot...")
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    builder = ApplicationBuilder().token(BOT_TOKEN)
+
+    if LOCAL_BOT_API_URL:
+        # local_mode allows local file handling directly without HTTP re-upload
+        builder = builder.base_url(LOCAL_BOT_API_URL).local_mode(True)
+        print(f"📡 Mode: LOCAL BOT API SERVER ({LOCAL_BOT_API_URL})")
+        print(f"📦 Batas ukuran file: {MAX_FILE_SIZE_MB} MB (s.d 2 GB)")
+    else:
+        print(f"☁️ Mode: TELEGRAM CLOUD SERVER (Batas default: {MAX_FILE_SIZE_MB} MB)")
+
+    app = builder.build()
 
     # Handlers
     app.add_handler(CommandHandler("start", start_handler))

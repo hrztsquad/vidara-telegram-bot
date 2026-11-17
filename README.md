@@ -95,11 +95,48 @@ Setelah `systemd` aktif, Anda dapat mengontrol bot kapan saja dengan perintah:
 
 ---
 
-## ⚠️ Catatan Batasan Ukuran File Telegram
+## 🚀 Mengaktifkan Unggahan Video Hingga 2 GB (Local Bot API)
 
-Server Telegram Bot standar membatasi unggahan file video maksimal **50 MB** per file. 
-- Jika file melebihi 50 MB, bot akan menampilkan pesan pemberitahuan.
-- Untuk mengunggah file hingga **2 GB (2000 MB)**, Anda dapat mengaktifkan *Local Telegram Bot API Server* di VPS Anda.
+Secara default, Telegram membatasi upload bot standar maksimal **50 MB**. Namun karena VPS Anda memiliki RAM dan storage yang besar, Anda dapat mengaktifkan **Local Telegram Bot API Server** agar batas upload naik menjadi **2.000 MB (2 GB)**:
+
+1. **Dapatkan `api_id` dan `api_hash` Anda:**
+   - Login di [my.telegram.org](https://my.telegram.org) menggunakan nomor Telegram Anda.
+   - Pilih menu **API development tools**.
+   - Buat aplikasi baru (isi nama aplikasi sembarang, misal `VidaraDownloader`).
+   - Salin nilai **api_id** dan **api_hash**.
+
+2. **Jalankan Local Bot API Server via Docker di VPS:**
+   ```bash
+   # Pasang Docker jika belum ada
+   sudo apt install -y docker.io
+
+   # Jalankan server lokal di background
+   sudo docker run -d \
+     --name telegram-bot-api \
+     --restart always \
+     -p 8081:8081 \
+     -v /tmp/telegram-bot-api-data:/var/lib/telegram-bot-api \
+     aiogram/telegram-bot-api:latest \
+     --api-id=ISI_DENGAN_API_ID \
+     --api-hash=ISI_DENGAN_API_HASH \
+     --local
+   ```
+
+3. **Sambungkan bot Anda ke Local Server:**
+   Buka file `.env`:
+   ```bash
+   nano .env
+   ```
+   Tambahkan/aktifkan baris berikut:
+   ```env
+   LOCAL_BOT_API_URL="http://127.0.0.1:8081/bot"
+   MAX_FILE_SIZE_MB=2000
+   ```
+   Lalu restart bot:
+   ```bash
+   sudo systemctl restart vidarabot
+   ```
+   Sekarang bot Anda sudah dapat mengunggah video berukuran hingga **2 GB**!
 
 ---
 
