@@ -2,14 +2,17 @@
 """
 Telegram Bot for downloading Vidara videos.
 Seamlessly integrates VidaraEngine with python-telegram-bot.
+Equipped with live progress tracking, /status command, and Telegram command menu.
 """
 
 import os
 import re
+import time
+import shutil
 import asyncio
 import logging
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
@@ -43,18 +46,57 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Regex to detect Vidara URLs (with or without https/http)
 VIDARA_URL_PATTERN = re.compile(r"(?:https?://)?(?:www\.)?vidara\.(?:to|so|cc|org|net)/[^\s]+", re.IGNORECASE)
 
+# Runtime statistics
+BOT_START_TIME = time.time()
+ACTIVE_DOWNLOADS = {}  # chat_id -> dict of info
+
+
+def get_uptime_str() -> str:
+    """Returns human-readable uptime."""
+    elapsed = int(time.time() - BOT_START_TIME)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    days, hours = divmod(hours, 24)
+    if days > 0:
+        return f"{days} hari, {hours} jam, {minutes} mnt"
+    if hours > 0:
+        return f"{hours} jam, {minutes} mnt, {seconds} dtk"
+    return f"{minutes} mnt, {seconds} dtk"
+
+
+async def set_bot_menu(application) -> None:
+    """Registers commands to the Telegram bottom menu button."""
+    commands = [
+        BotCommand("download", "Unduh video dari link Vidara"),
+        BotCommand("status", "Cek status bot, server, dan kapasitas disk VPS"),
+        BotCommand("start", "Mulai bot & panduan penggunaan"),
+        BotCommand("help", "Bantuan & daftar perintah"),
+    ]
+    try:
+        await application.bot.set_my_commands(commands)
+        logger.info("Bot command menu registered successfully.")
+    except Exception as e:
+        logger.warning(f"Failed to set bot commands menu: {e}")
+
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /start command."""
+    mode_text = (
+        "🚀 <b>Local Bot API (Aktif)</b> - Maksimal s.d <b>2.000 MB (2 GB)</b>"
+        if LOCAL_BOT_API_URL else
+        "☁️ <b>Cloud Bot API</b> - Maksimal <b>50 MB</b>"
+    )
+
     welcome_text = (
         "👋 <b>Halo! Selamat datang di Vidara Downloader Bot.</b>\n\n"
         "Saya dapat membantu Anda mengunduh video dari Vidara (<code>vidara.to</code> / <code>vidara.so</code>) "
-        "langsung ke chat Telegram ini tanpa iklan!\n\n"
-        "📌 <b>Cara Penggunaan:</b>\n"
-        "1. Kirim perintah: <code>/download &lt;link_video&gt;</code>\n"
-        "   <i>Contoh:</i> <code>/download https://vidara.to/e/WJ0DOTFNCx4cg</code>\n\n"
-        "2. Atau cukup <b>kirim/paste link Vidara langsung</b> ke chat ini.\n\n"
-        "💡 <i>Catatan: Telegram Bot membatasi ukuran file upload maksimal 50 MB untuk server bot standar.</i>"
+        "langsung ke chat Telegram ini tanpa iklan dan dengan kualitas orisinal!\n\n"
+        "📋 <b>Daftar Menu Perintah:</b>\n"
+        "• <code>/download &lt;link&gt;</code> : Mengunduh video dari tautan Vidara.\n"
+        "• <code>/status</code> : Melihat kondisi server VPS, RAM, disk, & proses aktif.\n"
+        "• <code>/help</code> : Panduan cara menggunakan bot.\n\n"
+        "💡 <i>Tips: Anda juga bisa langsung menempelkan (paste) link Vidara ke obrolan ini tanpa mengetik /download.</i>\n\n"
+        f"⚙️ <b>Mode Server:</b>\n{mode_text}"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
 
@@ -62,22 +104,68 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /help command."""
     help_text = (
-        "📖 <b>Panduan Penggunaan Bot:</b>\n\n"
-        "• <code>/download &lt;link&gt;</code> : Mengunduh video dari URL Vidara yang diberikan.\n"
-        "• <code>/help</code> : Menampilkan panduan bantuan ini.\n"
-        "• <code>/start</code> : Memulai bot & info umum.\n\n"
-        "Anda juga bisa langsung mengirimkan link video Vidara tanpa perintah /download."
+        "📖 <b>Panduan Penggunaan Bot Vidara:</b>\n\n"
+        "1. <b>Cara Mengunduh Video:</b>\n"
+        "   Ketik: <code>/download https://vidara.to/v/xxxx</code>\n"
+        "   Atau cukup kirimkan tautan langsung: <code>vidara.to/v/xxxx</code>\n\n"
+        "2. <b>Mengecek Status Bot:</b>\n"
+        "   Ketik <code>/status</code> untuk melihat apakah bot sedang aktif, ruang disk VPS, dan antrean unduhan.\n\n"
+        "3. <b>Progres Transparan:</b>\n"
+        "   Saat proses unduh berjalan, pesan di chat akan diperbarui secara otomatis setiap beberapa detik memperlihatkan jumlah MB yang berhasil diunduh."
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
+async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the /status command, displaying health, disk space, and active jobs."""
+    # Disk usage
+    total, used, free = shutil.disk_usage(DOWNLOAD_DIR)
+    total_gb = total / (1024 ** 3)
+    used_gb = used / (1024 ** 3)
+    free_gb = free / (1024 ** 3)
+
+    # Server mode
+    if LOCAL_BOT_API_URL:
+        server_mode = f"🟢 <b>Local Bot API Server</b> (Port 8081)\n   📦 Batas File: <b>{MAX_FILE_SIZE_MB} MB (2 GB)</b>"
+    else:
+        server_mode = f"🟡 <b>Telegram Cloud API</b>\n   📦 Batas File: <b>{MAX_FILE_SIZE_MB} MB</b>"
+
+    # Active downloads
+    active_count = len(ACTIVE_DOWNLOADS)
+    if active_count > 0:
+        active_list = "\n".join([f"• <i>{info.get('title', 'Video')}</i> ({info.get('progress', '0 MB')})" for info in ACTIVE_DOWNLOADS.values()])
+        activity_str = f"⏳ <b>Sedang Berjalan ({active_count} proses):</b>\n{active_list}"
+    else:
+        activity_str = "💤 <b>Aktivitas:</b> Tidak ada unduhan aktif (Standby)"
+
+    status_message = (
+        "🖥️ <b>STATUS SISTEM BOT VIDARA</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏱️ <b>Uptime Bot:</b> <code>{get_uptime_str()}</code>\n"
+        f"⚙️ <b>Mode Koneksi:</b>\n{server_mode}\n\n"
+        f"💾 <b>Penyimpanan VPS:</b>\n"
+        f"   • Total   : <code>{total_gb:.1f} GB</code>\n"
+        f"   • Terpakai: <code>{used_gb:.1f} GB</code>\n"
+        f"   • Sisa    : <code>{free_gb:.1f} GB (Aman)</code>\n\n"
+        f"{activity_str}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ <i>Semua sistem berfungsi normal dan siap menerima link.</i>"
+    )
+    await update.message.reply_text(status_message, parse_mode=ParseMode.HTML)
+
+
 async def process_video_download(update: Update, target_url: str):
     """Core logic to download from Vidara and send to Telegram with live progress."""
+    chat_id = update.effective_chat.id
     status_msg = await update.message.reply_text(
         "🔍 <b>[1/3] Menghubungkan ke Vidara & memeriksa metadata...</b>",
         parse_mode=ParseMode.HTML
     )
     file_path = None
+    title = "Video Vidara"
+
+    # Register in active downloads
+    ACTIVE_DOWNLOADS[chat_id] = {"title": "Memeriksa URL...", "progress": "0 MB"}
 
     try:
         loop = asyncio.get_running_loop()
@@ -89,11 +177,14 @@ async def process_video_download(update: Update, target_url: str):
         filename = f"{sanitize_filename(title)}.mp4"
         expected_output_path = os.path.join(DOWNLOAD_DIR, filename)
 
+        ACTIVE_DOWNLOADS[chat_id]["title"] = title
+
         await status_msg.edit_text(
             f"🎬 <b>{title}</b>\n\n"
             f"⏳ <b>[2/3] Memulai proses download stream via FFmpeg...</b>\n"
             f"📊 Terunduh saat ini: <code>0.0 MB</code>\n"
-            f"⚡ Mode: Stream-Copy (Kualitas Asli)",
+            f"⚡ Mode: Stream-Copy (Kualitas Asli)\n"
+            f"⏱️ Status: Berjalan lancar",
             parse_mode=ParseMode.HTML
         )
 
@@ -109,13 +200,15 @@ async def process_video_download(update: Update, target_url: str):
                 if os.path.exists(expected_output_path):
                     try:
                         current_mb = os.path.getsize(expected_output_path) / (1024 * 1024)
+                        ACTIVE_DOWNLOADS[chat_id]["progress"] = f"{current_mb:.1f} MB"
                         if abs(current_mb - last_reported_mb) >= 0.8:
                             last_reported_mb = current_mb
                             await status_msg.edit_text(
                                 f"🎬 <b>{title}</b>\n\n"
                                 f"⏳ <b>[2/3] Sedang mengunduh stream video ke VPS...</b>\n"
                                 f"📊 Terunduh: <code>{current_mb:.1f} MB</code>\n"
-                                f"⚡ Mode: Stream-Copy FFmpeg (Kualitas Asli)",
+                                f"⚡ Mode: Stream-Copy FFmpeg (Kualitas Asli)\n"
+                                f"⏱️ Status: Mengambil potongan video...",
                                 parse_mode=ParseMode.HTML
                             )
                     except Exception:
@@ -131,7 +224,7 @@ async def process_video_download(update: Update, target_url: str):
             reporter_task.cancel()
 
         if not file_path or not os.path.exists(file_path):
-            raise RuntimeError("File hasil unduhan tidak ditemukan di server.")
+            raise RuntimeError("File hasil unduhan tidak ditemukan di server VPS.")
 
         # Check final file size
         file_size_bytes = os.path.getsize(file_path)
@@ -154,7 +247,7 @@ async def process_video_download(update: Update, target_url: str):
         await status_msg.edit_text(
             f"🎬 <b>{title}</b>\n\n"
             f"📤 <b>[3/3] Selesai diunduh ({file_size_mb:.1f} MB)!</b>\n"
-            f"Sedang mengunggah file video ke Telegram...",
+            f"Sedang mengunggah file video ke obrolan Telegram Anda...",
             parse_mode=ParseMode.HTML
         )
 
@@ -170,8 +263,8 @@ async def process_video_download(update: Update, target_url: str):
                 caption=caption,
                 parse_mode=ParseMode.HTML,
                 supports_streaming=True,
-                read_timeout=600,
-                write_timeout=600,
+                read_timeout=900,
+                write_timeout=900,
                 connect_timeout=60
             )
 
@@ -181,11 +274,15 @@ async def process_video_download(update: Update, target_url: str):
     except Exception as exc:
         logger.error(f"Error handling download for {target_url}: {exc}", exc_info=True)
         await status_msg.edit_text(
-            f"❌ <b>Terjadi kesalahan saat memproses unduhan:</b>\n<code>{str(exc)}</code>",
+            f"❌ <b>Terkendala saat memproses unduhan:</b>\n\n"
+            f"Tautan: <code>{target_url}</code>\n"
+            f"Alasan: <code>{str(exc)}</code>\n\n"
+            f"<i>Silakan periksa kembali apakah video di tautan tersebut masih aktif di Vidara.</i>",
             parse_mode=ParseMode.HTML
         )
 
     finally:
+        ACTIVE_DOWNLOADS.pop(chat_id, None)
         # Cleanup temporary files on VPS to keep disk clean
         if file_path and os.path.exists(file_path):
             try:
@@ -201,7 +298,7 @@ async def download_command_handler(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text(
             "⚠️ <b>Format perintah salah!</b>\n\n"
             "Gunakan format: <code>/download &lt;link_vidara&gt;</code>\n"
-            "<i>Contoh:</i> <code>/download https://vidara.to/e/WJ0DOTFNCx4cg</code>",
+            "<i>Contoh:</i> <code>/download https://vidara.to/v/WJ0DOTFNCx4cg</code>",
             parse_mode=ParseMode.HTML
         )
         return
@@ -242,7 +339,7 @@ def main():
         return
 
     print("🚀 Menginisialisasi Vidara Downloader Telegram Bot...")
-    builder = ApplicationBuilder().token(BOT_TOKEN)
+    builder = ApplicationBuilder().token(BOT_TOKEN).post_init(set_bot_menu)
 
     if LOCAL_BOT_API_URL:
         # local_mode allows local file handling directly without HTTP re-upload
@@ -257,10 +354,11 @@ def main():
     # Handlers
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("help", help_handler))
+    app.add_handler(CommandHandler("status", status_handler))
     app.add_handler(CommandHandler("download", download_command_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_url_handler))
 
-    print("🤖 Bot Telegram aktif dan siap menerima perintah!")
+    print("🤖 Bot Telegram aktif dan menu perintah berhasil dipasang!")
     app.run_polling()
 
 
