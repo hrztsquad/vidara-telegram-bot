@@ -41,6 +41,9 @@ class VidaraEngine:
         Returns:
             VideoMetadata: Returns the neatly formatted video information.
         """
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+
         hostname = extract_hostname(url)
         filecode = extract_filecode(url)
         

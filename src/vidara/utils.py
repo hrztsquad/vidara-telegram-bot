@@ -40,6 +40,8 @@ def extract_hostname(url: str) -> str:
     Raises:
         MetadataError: If the domain name cannot be found.
     """
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
     hostname = urlparse(url).hostname
     if not hostname:
         raise MetadataError("The URL does not contain a valid hostname.")

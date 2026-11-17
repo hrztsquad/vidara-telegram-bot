@@ -37,8 +37,8 @@ DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/vidara_downloads")
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Regex to detect Vidara URLs
-VIDARA_URL_PATTERN = re.compile(r"https?://(?:www\.)?vidara\.(?:to|so)/[^\s]+", re.IGNORECASE)
+# Regex to detect Vidara URLs (with or without https/http)
+VIDARA_URL_PATTERN = re.compile(r"(?:https?://)?(?:www\.)?vidara\.(?:to|so|cc|org|net)/[^\s]+", re.IGNORECASE)
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -176,7 +176,11 @@ async def download_command_handler(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
-    await process_video_download(update, match.group(0))
+    target_url = match.group(0)
+    if not target_url.startswith(("http://", "https://")):
+        target_url = "https://" + target_url
+
+    await process_video_download(update, target_url)
 
 
 async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -185,6 +189,8 @@ async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     match = VIDARA_URL_PATTERN.search(text)
     if match:
         target_url = match.group(0)
+        if not target_url.startswith(("http://", "https://")):
+            target_url = "https://" + target_url
         await process_video_download(update, target_url)
 
 
